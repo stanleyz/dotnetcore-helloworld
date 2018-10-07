@@ -1,0 +1,51 @@
+variables:
+  buildConfiguration: 'Release'
+  webAppName: 'sztest1'
+  azureSubscription: 'sztest1'
+
+jobs:
+
+- job: buildandtest
+  pool:
+    vmImage: 'Ubuntu-16.04'
+  steps:
+  - script: |
+      dotnet build --configuration $(buildConfiguration)
+      dotnet test dotnetcore-tests --configuration $(buildConfiguration) --logger trx
+
+  - task: PublishTestResults@2
+    inputs:
+      testRunner: VSTest
+      testResultsFiles: '**/*.trx'
+
+  - task: DotNetCoreCLI@1
+    inputs:
+      command: publish
+      publishWebProjects: True
+      arguments: '--configuration $(buildConfiguration) --output $(Build.ArtifactStagingDirectory)'
+      zipAfterPublish: True
+
+  - task: AzureRmWebAppDeployment@3
+    inputs:
+      azureSubscription: $(azureSubscription)
+      WebAppName: $(webAppName)
+      Package: $(Build.ArtifactStagingDirectory)/**/*.zip
+
+  - script: test $(curl -o /dev/null -sw '%{http_code}' http://$(webAppName).azurewebsites.net/api/values) == 200
+
+- job: prod
+  pool:
+    vmImage: 'Ubuntu-16.04'
+  dependsOn: buildandtest
+  condition: succeeded()
+  steps:
+
+  # step to download the artifacts from the previous job
+  - task: DownloadBuildArtifacts@0
+    inputs:
+      artifactName: drop
+
+  - task: AzureRmWebAppDeployment@3
+    inputs:
+      azureSubscription: $(azureSubscription)
+      WebAppName: $(webAppName)
